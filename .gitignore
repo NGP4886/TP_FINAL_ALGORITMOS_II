@@ -1,0 +1,15 @@
+Plaintext
+# Directorios de compilación
+[Bb]in/
+[Oo]bj/
+
+# Archivos específicos de usuario y temporales de Visual Studio
+.vs/
+*.user
+*.suo
+*.rsuser
+*.sln.docstates
+
+# Archivos de configuración de base de datos o secretos (cuando agregues la conexión a MySQL)
+appsettings.json
+*.config.user
