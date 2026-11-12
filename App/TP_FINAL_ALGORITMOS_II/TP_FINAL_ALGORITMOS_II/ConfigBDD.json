@@ -1,0 +1,9 @@
+// JSON CON DATOS DE LA CONEXION A LA BASE DE DATOS
+
+{
+  "Servidor": "localhost",
+  "Puerto": 3306,
+  "BaseDeDatos": "CoworkingDB",
+  "Usuario": "root",
+  "Clave": ""
+}

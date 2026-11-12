@@ -9,11 +9,16 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
     public class PuestoDeTrabajo:Recurso
     {
         public bool TieneImpresora { get; set; }
+        public bool TieneNotebook { get; set; }
 
         public PuestoDeTrabajo() : base()
         {
-            IdTipo = 2;
+            
         }
-        
+
+        public override bool PuedeReservarse(DateTime fecha, TimeSpan horaInicio, TimeSpan horaFin)
+        {
+            return base.PuedeReservarse(fecha, horaInicio, horaFin); // aca va la logica antes de llamar a la fn
+        }
     }
 }

@@ -7,14 +7,21 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using TP_FINAL_ALGORITMOS_II.Conexion_BDD;
 
 namespace TP_FINAL_ALGORITMOS_II
 {
     public partial class Form1 : Form
     {
+
+        private readonly RecursoDAO recursoDAO = new RecursoDAO();
+        
+        
         public Form1()
         {
             InitializeComponent();
+            
+            
         }
     }
 }
