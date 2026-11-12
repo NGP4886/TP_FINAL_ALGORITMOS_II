@@ -6,7 +6,14 @@ using System.Threading.Tasks;
 
 namespace TP_FINAL_ALGORITMOS_II.Modelos
 {
-    internal class PuestoDeTrabajo
+    public class PuestoDeTrabajo:Recurso
     {
+        public bool TieneImpresora { get; set; }
+
+        public PuestoDeTrabajo() : base()
+        {
+            IdTipo = 2;
+        }
+        
     }
 }

@@ -6,7 +6,10 @@ using System.Threading.Tasks;
 
 namespace TP_FINAL_ALGORITMOS_II.Enums
 {
-    internal class EstadoRecurso
+    public enum EstadoRecurso
     {
+        Disponible,
+        Mantenimiento,
+        Inactivo
     }
 }
