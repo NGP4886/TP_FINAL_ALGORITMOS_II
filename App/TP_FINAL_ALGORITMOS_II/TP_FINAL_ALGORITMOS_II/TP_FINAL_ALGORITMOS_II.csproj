@@ -108,6 +108,7 @@
     <Compile Include="Conexion BDD\ConexionDAO.cs" />
     <Compile Include="Conexion BDD\ConfigConexion.cs" />
     <Compile Include="Conexion BDD\RecursoDAO.cs" />
+    <Compile Include="Conexion BDD\ReservaDAO.cs" />
     <Compile Include="Enums\EstadoRecurso.cs" />
     <Compile Include="Enums\EstadoReserva.cs" />
     <Compile Include="Form1.cs">
@@ -117,6 +118,7 @@
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
     <Compile Include="Interfaces\IReservable.cs" />
+    <Compile Include="Modelos\Adicional.cs" />
     <Compile Include="Modelos\Cliente.cs" />
     <Compile Include="Modelos\FabricaDeRecursos.cs" />
     <Compile Include="Modelos\OficinaPrivada.cs" />

@@ -10,15 +10,21 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
     {
         public bool TieneImpresora { get; set; }
         public bool TieneNotebook { get; set; }
+        
 
-        public PuestoDeTrabajo() : base()
+        public PuestoDeTrabajo() : base() { }
+
+
+        public override bool PuedeReservarse(DateTime fecha, TimeSpan horaInicio, TimeSpan horaFin,int cantidadPersonas)
         {
-            
+            if (cantidadPersonas > 1) { return false; }
+
+            return base.PuedeReservarse(fecha, horaInicio, horaFin,cantidadPersonas); // aca va la logica antes de llamar a la fn
         }
 
-        public override bool PuedeReservarse(DateTime fecha, TimeSpan horaInicio, TimeSpan horaFin)
+        public override decimal CalcularCostoTotal(TimeSpan horaInicio, TimeSpan horaFin)
         {
-            return base.PuedeReservarse(fecha, horaInicio, horaFin); // aca va la logica antes de llamar a la fn
+            return base.CalcularCostoTotal(horaInicio, horaFin);
         }
     }
 }

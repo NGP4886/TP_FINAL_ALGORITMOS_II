@@ -8,18 +8,19 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
 {
     public class OficinaPrivada:Recurso
     {
-        public bool TieneAireAcondicionado { get; set; }
-        public bool ConLlave { get; set; }
-        public bool ServicioLunch { get; set; }
+        public OficinaPrivada() : base() { }
 
-        public OficinaPrivada() : base()
+        public override bool PuedeReservarse(DateTime fecha, TimeSpan horaInicio, TimeSpan horaFin, int cantidadPersonas)
         {
-            
+            return base.PuedeReservarse(fecha, horaInicio, horaFin,cantidadPersonas); // aca va la logica antes de llamar a la fn
         }
 
-        public override bool PuedeReservarse(DateTime fecha, TimeSpan horaInicio, TimeSpan horaFin)
+        public override decimal CalcularCostoTotal(TimeSpan horaInicio, TimeSpan horaFin)
         {
-            return base.PuedeReservarse(fecha, horaInicio, horaFin); // aca va la logica antes de llamar a la fn
+            decimal costoBase = base.CalcularCostoTotal(horaInicio, horaFin);
+
+            decimal costosAdicionales = 0;
+            return costoBase + costosAdicionales;
         }
 
     }

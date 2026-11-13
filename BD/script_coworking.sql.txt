@@ -1,17 +1,7 @@
--- ==========================================
--- CREACIÓN DE LA BASE DE DATOS
--- ==========================================
-CREATE DATABASE IF NOT EXISTS CoworkingDB;
-USE CoworkingDB;
+DROP DATABASE IF EXISTS coworkingdb;
+CREATE DATABASE coworkingdb;
+USE coworkingdb;
 
--- ==========================================
--- 1. TABLAS Y RESTRICCIONES
--- ==========================================
-
-CREATE TABLE TiposRecurso (
-    id_tipo INT AUTO_INCREMENT PRIMARY KEY,
-    descripcion VARCHAR(50) NOT NULL UNIQUE
-);
 
 CREATE TABLE Clientes (
     id_cliente INT AUTO_INCREMENT PRIMARY KEY,
@@ -23,16 +13,42 @@ CREATE TABLE Clientes (
     activo BOOLEAN DEFAULT TRUE
 );
 
+CREATE TABLE TiposRecurso (
+    id_tipo INT AUTO_INCREMENT PRIMARY KEY,
+    descripcion VARCHAR(50) NOT NULL UNIQUE
+);
+
+-- 3. Tabla Recursos central
 CREATE TABLE Recursos (
     id_recurso INT AUTO_INCREMENT PRIMARY KEY,
     id_tipo INT NOT NULL,
     nombre VARCHAR(100) NOT NULL,
     ubicacion VARCHAR(100) NOT NULL,
-    capacidad INT DEFAULT 1,
+    capacidad INT NOT NULL DEFAULT 1,
+    precio_por_hora DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     estado ENUM('Disponible', 'Mantenimiento', 'Inactivo') DEFAULT 'Disponible',
     FOREIGN KEY (id_tipo) REFERENCES TiposRecurso(id_tipo) ON DELETE RESTRICT
 );
 
+-- 4. NUEVO: Tabla catálogo de Adicionales
+CREATE TABLE Adicionales (
+    id_adicional INT AUTO_INCREMENT PRIMARY KEY,
+    id_tipo_recurso INT NOT NULL, -- ACÁ ESTÁ LA VALIDACIÓN: Este adicional solo aplica a este tipo
+    descripcion VARCHAR(100) NOT NULL, -- Ej: "Proyector", "Barra Libre", "Monitor Extra"
+    costo_extra DECIMAL(10,2) DEFAULT 0.00, -- Si el adicional cobra un recargo
+    FOREIGN KEY (id_tipo_recurso) REFERENCES TiposRecurso(id_tipo) ON DELETE CASCADE
+);
+
+-- 5. NUEVO: Tabla Intermedia (Qué recurso tiene qué adicional)
+CREATE TABLE Recursos_Adicionales (
+    id_recurso INT,
+    id_adicional INT,
+    PRIMARY KEY (id_recurso, id_adicional),
+    FOREIGN KEY (id_recurso) REFERENCES Recursos(id_recurso) ON DELETE CASCADE,
+    FOREIGN KEY (id_adicional) REFERENCES Adicionales(id_adicional) ON DELETE CASCADE
+);
+
+-- 6. Tabla Reservas
 CREATE TABLE Reservas (
     id_reserva INT AUTO_INCREMENT PRIMARY KEY,
     id_cliente INT NOT NULL,
@@ -40,13 +56,204 @@ CREATE TABLE Reservas (
     fecha_reserva DATE NOT NULL,
     hora_inicio TIME NOT NULL,
     hora_fin TIME NOT NULL,
+    cantidad_personas INT NOT NULL DEFAULT 1,
+    costo_total DECIMAL(10,2) DEFAULT 0.00,
     estado ENUM('Activa', 'Cancelada', 'Finalizada') DEFAULT 'Activa',
     fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (id_cliente) REFERENCES Clientes(id_cliente) ON DELETE RESTRICT,
     FOREIGN KEY (id_recurso) REFERENCES Recursos(id_recurso) ON DELETE RESTRICT
 );
 
--- Tabla para el Trigger de Auditoría
+
+DELIMITER //
+
+-- =========================================================
+-- FUNCIÓN: Verificar Disponibilidad (Filtro de Solapamiento)
+-- =========================================================
+CREATE FUNCTION fn_verificar_disponibilidad(
+    p_id_recurso INT, 
+    p_fecha DATE, 
+    p_hora_inicio TIME, 
+    p_hora_fin TIME,
+    p_id_reserva_excluir INT -- Para ignorar la reserva actual si estamos modificando
+) RETURNS BOOLEAN
+DETERMINISTIC
+BEGIN
+    DECLARE v_existe INT;
+    DECLARE v_conflictos INT;
+    
+    -- Verificar existencia real del recurso
+    SELECT COUNT(*) INTO v_existe FROM Recursos WHERE id_recurso = p_id_recurso;
+    IF v_existe = 0 THEN 
+        RETURN FALSE; 
+    END IF;
+    
+    -- Buscar superposiciones en reservas activas para ese mismo día
+    SELECT COUNT(*) INTO v_conflictos
+    FROM Reservas
+    WHERE id_recurso = p_id_recurso 
+      AND fecha_reserva = p_fecha
+      AND estado = 'Activa'
+      AND id_reserva != IFNULL(p_id_reserva_excluir, 0)
+      AND (
+          (p_hora_inicio >= hora_inicio AND p_hora_inicio < hora_fin) OR
+          (p_hora_fin > hora_inicio AND p_hora_fin <= hora_fin) OR
+          (p_hora_inicio <= hora_inicio AND p_hora_fin >= hora_fin)
+      );
+      
+    RETURN IF(v_conflictos > 0, FALSE, TRUE);
+END //
+
+
+-- =========================================================
+-- PROCEDIMIENTO 1: Alta de Reserva
+-- =========================================================
+DELIMITER //
+CREATE PROCEDURE sp_alta_reserva(
+    IN p_id_cliente INT,
+    IN p_id_recurso INT,
+    IN p_fecha DATE,
+    IN p_hora_inicio TIME,
+    IN p_hora_fin TIME,
+    IN p_cantidad_personas INT
+)
+BEGIN
+    DECLARE v_recurso_estado VARCHAR(20);
+    DECLARE v_capacidad INT;
+    DECLARE v_precio_hora DECIMAL(10,2);
+    DECLARE v_horas DECIMAL(10,2);
+    DECLARE v_costo_total DECIMAL(10,2);
+    
+    -- 1. Validar Cliente
+    IF NOT EXISTS(SELECT 1 FROM Clientes WHERE id_cliente = p_id_cliente AND activo = TRUE) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El cliente no existe o se encuentra inactivo.';
+    END IF;
+
+    -- 2. Validar Recurso y Capacidad
+    SELECT estado, capacidad, precio_por_hora INTO v_recurso_estado, v_capacidad, v_precio_hora 
+    FROM Recursos WHERE id_recurso = p_id_recurso;
+    
+    IF v_recurso_estado IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El recurso seleccionado no existe.';
+    ELSEIF v_recurso_estado != 'Disponible' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El recurso seleccionado no se encuentra disponible.';
+    END IF;
+
+    IF p_cantidad_personas > v_capacidad THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La cantidad de personas supera la capacidad máxima del recurso.';
+    END IF;
+
+    -- 3. Validar Tiempos y Fechas
+    IF p_hora_inicio >= p_hora_fin THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La hora de inicio debe ser anterior a la hora de fin.';
+    END IF;
+
+    IF p_fecha < CURDATE() OR (p_fecha = CURDATE() AND p_hora_inicio <= CURTIME()) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No se pueden registrar reservas en fechas u horarios que ya pasaron.';
+    END IF;
+    
+    -- 4. Validar Solapamiento
+    IF fn_verificar_disponibilidad(p_id_recurso, p_fecha, p_hora_inicio, p_hora_fin, NULL) = FALSE THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El recurso ya se encuentra reservado en el horario seleccionado.';
+    END IF;
+    
+    -- 5. Calcular costo básico e insertar
+    SET v_horas = TIMESTAMPDIFF(MINUTE, p_hora_inicio, p_hora_fin) / 60.0;
+    SET v_costo_total = v_precio_hora * v_horas;
+    
+    INSERT INTO Reservas (id_cliente, id_recurso, fecha_reserva, hora_inicio, hora_fin, cantidad_personas, costo_total)
+    VALUES (p_id_cliente, p_id_recurso, p_fecha, p_hora_inicio, p_hora_fin, p_cantidad_personas, v_costo_total);
+END //
+DELIMITER ;
+
+-- =========================================================
+-- PROCEDIMIENTO 2: Modificar Reserva
+-- =========================================================
+DELIMITER //
+CREATE PROCEDURE sp_modificar_reserva(
+    IN p_id_reserva INT,
+    IN p_nueva_fecha DATE,
+    IN p_nueva_hora_inicio TIME,
+    IN p_nueva_hora_fin TIME,
+    IN p_nueva_cantidad_personas INT
+)
+BEGIN
+    DECLARE v_id_recurso INT;
+    DECLARE v_estado VARCHAR(20);
+    DECLARE v_capacidad INT;
+    DECLARE v_precio_hora DECIMAL(10,2);
+    DECLARE v_horas DECIMAL(10,2);
+    DECLARE v_nuevo_costo DECIMAL(10,2);
+    
+    -- Obtener datos actuales
+    SELECT r.id_recurso, r.estado, rec.capacidad, rec.precio_por_hora 
+    INTO v_id_recurso, v_estado, v_capacidad, v_precio_hora
+    FROM Reservas r
+    INNER JOIN Recursos rec ON r.id_recurso = rec.id_recurso
+    WHERE r.id_reserva = p_id_reserva;
+    
+    IF v_estado IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La reserva no existe.';
+    ELSEIF v_estado != 'Activa' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Solo se pueden modificar reservas activas.';
+    END IF;
+
+    IF p_nueva_cantidad_personas > v_capacidad THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La nueva cantidad de asistentes supera la capacidad del recurso.';
+    END IF;
+
+    IF p_nueva_hora_inicio >= p_nueva_hora_fin THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La hora de inicio debe ser anterior a la hora de fin.';
+    END IF;
+
+    IF p_nueva_fecha < CURDATE() OR (p_nueva_fecha = CURDATE() AND p_nueva_hora_inicio <= CURTIME()) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No se puede reprogramar una reserva para una fecha/hora pasada.';
+    END IF;
+
+    IF fn_verificar_disponibilidad(v_id_recurso, p_nueva_fecha, p_nueva_hora_inicio, p_nueva_hora_fin, p_id_reserva) = FALSE THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El nuevo horario se superpone con otra reserva existente.';
+    END IF;
+    
+    SET v_horas = TIMESTAMPDIFF(MINUTE, p_nueva_hora_inicio, p_nueva_hora_fin) / 60.0;
+    SET v_nuevo_costo = v_precio_hora * v_horas;
+
+    UPDATE Reservas 
+    SET fecha_reserva = p_nueva_fecha, 
+        hora_inicio = p_nueva_hora_inicio, 
+        hora_fin = p_nueva_hora_fin, 
+        cantidad_personas = p_nueva_cantidad_personas,
+        costo_total = v_nuevo_costo
+    WHERE id_reserva = p_id_reserva;
+END //
+DELIMITER ;
+
+-- =========================================================
+-- PROCEDIMIENTO 3: Cancelar Reserva
+-- =========================================================
+DELIMITER //
+CREATE PROCEDURE sp_cancelar_reserva(IN p_id_reserva INT)
+BEGIN
+    DECLARE v_estado VARCHAR(20);
+    
+    SELECT estado INTO v_estado FROM Reservas WHERE id_reserva = p_id_reserva;
+    
+    IF v_estado IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La reserva seleccionada no existe.';
+    ELSEIF v_estado = 'Cancelada' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La reserva ya se encuentra cancelada.';
+    ELSEIF v_estado = 'Finalizada' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No se puede cancelar una reserva que ya finalizó.';
+    END IF;
+
+    UPDATE Reservas SET estado = 'Cancelada' WHERE id_reserva = p_id_reserva;
+END //
+
+DELIMITER ;
+
+
+-- =========================================================
+-- 1. TABLA DE AUDITORÍA (Necesaria para el Trigger)
+-- =========================================================
 CREATE TABLE Auditoria_Cancelaciones (
     id_auditoria INT AUTO_INCREMENT PRIMARY KEY,
     id_reserva INT NOT NULL,
@@ -55,198 +262,210 @@ CREATE TABLE Auditoria_Cancelaciones (
     usuario_db VARCHAR(50)
 );
 
--- ==========================================
--- 2. FUNCIÓN ALMACENADA
--- ==========================================
-
+-- =========================================================
+-- 2. TRIGGER: Auditoría de Cancelaciones
+-- =========================================================
 DELIMITER //
--- Determina si un recurso está disponible en un rango horario específico
-CREATE FUNCTION fn_verificar_disponibilidad(
-    p_id_recurso INT, 
-    p_fecha DATE, 
-    p_hora_inicio TIME, 
-    p_hora_fin TIME
-) RETURNS BOOLEAN
-DETERMINISTIC
-BEGIN
-    DECLARE v_conflictos INT;
-    
-    SELECT COUNT(*) INTO v_conflictos
-    FROM Reservas
-    WHERE id_recurso = p_id_recurso 
-      AND fecha_reserva = p_fecha
-      AND estado = 'Activa'
-      AND (
-          (p_hora_inicio >= hora_inicio AND p_hora_inicio < hora_fin) OR
-          (p_hora_fin > hora_inicio AND p_hora_fin <= hora_fin) OR
-          (p_hora_inicio <= hora_inicio AND p_hora_fin >= hora_fin)
-      );
-      
-    IF v_conflictos > 0 THEN
-        RETURN FALSE;
-    ELSE
-        RETURN TRUE;
-    END IF;
-END //
-DELIMITER ;
-
--- ==========================================
--- 3. PROCEDIMIENTOS ALMACENADOS
--- ==========================================
-
-DELIMITER //
-
--- Alta de Cliente
-CREATE PROCEDURE sp_alta_cliente(
-    IN p_dni VARCHAR(20),
-    IN p_nombre VARCHAR(50),
-    IN p_apellido VARCHAR(50),
-    IN p_telefono VARCHAR(20),
-    IN p_email VARCHAR(100)
-)
-BEGIN
-    INSERT INTO Clientes (dni, nombre, apellido, telefono, email)
-    VALUES (p_dni, p_nombre, p_apellido, p_telefono, p_email);
-END //
-
--- Alta de Recurso
-CREATE PROCEDURE sp_alta_recurso(
-    IN p_id_tipo INT,
-    IN p_nombre VARCHAR(100),
-    IN p_ubicacion VARCHAR(100),
-    IN p_capacidad INT
-)
-BEGIN
-    INSERT INTO Recursos (id_tipo, nombre, ubicacion, capacidad)
-    VALUES (p_id_tipo, p_nombre, p_ubicacion, p_capacidad);
-END //
-
--- Modificación de Recurso
-CREATE PROCEDURE sp_modificar_recurso(
-    IN p_id_recurso INT,
-    IN p_nombre VARCHAR(100),
-    IN p_ubicacion VARCHAR(100),
-    IN p_estado ENUM('Disponible', 'Mantenimiento', 'Inactivo')
-)
-BEGIN
-    UPDATE Recursos 
-    SET nombre = p_nombre, ubicacion = p_ubicacion, estado = p_estado
-    WHERE id_recurso = p_id_recurso;
-END //
-
--- Alta de Reserva (Contiene lógica de negocio y captura de error)
-CREATE PROCEDURE sp_alta_reserva(
-    IN p_id_cliente INT,
-    IN p_id_recurso INT,
-    IN p_fecha DATE,
-    IN p_hora_inicio TIME,
-    IN p_hora_fin TIME
-)
-BEGIN
-    DECLARE v_recurso_estado VARCHAR(20);
-    
-    -- Validar que el recurso no esté en mantenimiento o inactivo
-    SELECT estado INTO v_recurso_estado FROM Recursos WHERE id_recurso = p_id_recurso;
-    
-    IF v_recurso_estado != 'Disponible' THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El recurso seleccionado no se encuentra disponible actualmente.';
-    END IF;
-
-    -- Validar disponibilidad horaria (Evitar superposición)
-    IF fn_verificar_disponibilidad(p_id_recurso, p_fecha, p_hora_inicio, p_hora_fin) = FALSE THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El recurso ya se encuentra reservado en el horario seleccionado.';
-    END IF;
-    
-    -- Validar coherencia de horas
-    IF p_hora_inicio >= p_hora_fin THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La hora de inicio debe ser anterior a la hora de fin.';
-    END IF;
-
-    -- Insertar reserva
-    INSERT INTO Reservas (id_cliente, id_recurso, fecha_reserva, hora_inicio, hora_fin)
-    VALUES (p_id_cliente, p_id_recurso, p_fecha, p_hora_inicio, p_hora_fin);
-END //
-
--- Cancelación de Reserva
-CREATE PROCEDURE sp_cancelar_reserva(
-    IN p_id_reserva INT
-)
-BEGIN
-    UPDATE Reservas 
-    SET estado = 'Cancelada' 
-    WHERE id_reserva = p_id_reserva AND estado = 'Activa';
-END //
-DELIMITER ;
-
--- ==========================================
--- 4. VISTAS
--- ==========================================
-
--- Vista 1: Detalle completo de reservas con datos del cliente y del recurso
-CREATE VIEW vw_detalle_reservas AS
-SELECT 
-    r.id_reserva,
-    r.fecha_reserva,
-    r.hora_inicio,
-    r.hora_fin,
-    r.estado AS estado_reserva,
-    c.nombre AS cliente_nombre,
-    c.apellido AS cliente_apellido,
-    c.dni,
-    rec.nombre AS recurso_nombre,
-    t.descripcion AS tipo_recurso
-FROM Reservas r
-INNER JOIN Clientes c ON r.id_cliente = c.id_cliente
-INNER JOIN Recursos rec ON r.id_recurso = rec.id_recurso
-INNER JOIN TiposRecurso t ON rec.id_tipo = t.id_tipo;
-
--- Vista 2: Resumen de recursos con cantidad de reservas totales y activas
-CREATE VIEW vw_resumen_recursos AS
-SELECT 
-    rec.id_recurso,
-    rec.nombre,
-    t.descripcion AS tipo,
-    rec.estado AS estado_actual,
-    COUNT(r.id_reserva) AS total_reservas_historicas,
-    SUM(CASE WHEN r.estado = 'Activa' THEN 1 ELSE 0 END) AS reservas_activas
-FROM Recursos rec
-INNER JOIN TiposRecurso t ON rec.id_tipo = t.id_tipo
-LEFT JOIN Reservas r ON rec.id_recurso = r.id_recurso
-GROUP BY rec.id_recurso, rec.nombre, t.descripcion, rec.estado;
-
--- ==========================================
--- 5. TRIGGER
--- ==========================================
-
-DELIMITER //
--- Auditoría pequeña de una operación importante: Guardar registro al cancelar reserva
 CREATE TRIGGER trg_auditoria_cancelacion_reserva
-AFTER UPDATE ON Reservas
-FOR EACH ROW
+AFTER UPDATE ON Reservas FOR EACH ROW
 BEGIN
-    IF NEW.estado = 'Cancelada' AND OLD.estado = 'Activa' THEN
+    -- Si el estado cambió y el nuevo estado es 'Cancelada'
+    IF OLD.estado != 'Cancelada' AND NEW.estado = 'Cancelada' THEN
         INSERT INTO Auditoria_Cancelaciones (id_reserva, id_cliente, usuario_db)
         VALUES (OLD.id_reserva, OLD.id_cliente, CURRENT_USER());
     END IF;
 END //
 DELIMITER ;
 
--- ==========================================
--- 6. DATOS INICIALES DE PRUEBA
--- ==========================================
+-- =========================================================
+-- 3. VISTAS
+-- =========================================================
 
-INSERT INTO TiposRecurso (descripcion) VALUES 
-('Sala de reunión'), 
-('Puesto de trabajo'), 
-('Oficina privada');
+-- VISTA 1: Detalle completo de reservas (Ideal para el DataGridView principal)
+DELIMITER //
+CREATE VIEW vw_detalle_reservas AS
+SELECT 
+    r.id_reserva, 
+    r.fecha_reserva, 
+    r.hora_inicio, 
+    r.hora_fin, 
+    r.cantidad_personas,
+    r.costo_total, 
+    r.estado AS estado_reserva,
+    c.nombre AS cliente_nombre, 
+    c.apellido AS cliente_apellido, 
+    c.dni, 
+    rec.nombre AS recurso_nombre, 
+    t.descripcion AS tipo_recurso
+FROM Reservas r
+INNER JOIN Clientes c ON r.id_cliente = c.id_cliente
+INNER JOIN Recursos rec ON r.id_recurso = rec.id_recurso
+INNER JOIN TiposRecurso t ON rec.id_tipo = t.id_tipo;
 
-CALL sp_alta_cliente('11222333', 'Juan', 'Pérez', '2234567890', 'juan@email.com');
-CALL sp_alta_cliente('44555666', 'María', 'Gómez', '2239876543', 'maria@email.com');
+DELIMITER ;
 
-CALL sp_alta_recurso(1, 'Sala Einstein', 'Planta Baja - Sector A', 8);
-CALL sp_alta_recurso(2, 'Puesto Coworking 01', 'Planta Alta - Open Space', 1);
-CALL sp_alta_recurso(3, 'Oficina Privada 101', 'Planta Alta - Sector B', 3);
+-- VISTA 2: Resumen estadístico de recursos 
+DELIMITER //
+CREATE VIEW vw_resumen_recursos AS
+SELECT 
+    rec.id_recurso,
+    rec.nombre AS recurso_nombre,
+    t.descripcion AS tipo,
+    rec.estado,
+    COUNT(CASE WHEN r.estado = 'Activa' THEN 1 END) AS reservas_activas,
+    COUNT(r.id_reserva) AS total_reservas_historicas,
+    IFNULL(SUM(CASE WHEN r.estado = 'Finalizada' THEN r.costo_total ELSE 0 END), 0) AS recaudacion_finalizada
+FROM Recursos rec
+INNER JOIN TiposRecurso t ON rec.id_tipo = t.id_tipo
+LEFT JOIN Reservas r ON rec.id_recurso = r.id_recurso
+GROUP BY rec.id_recurso, rec.nombre, t.descripcion, rec.estado;
 
--- Se inserta una reserva manual inicial para pruebas
-INSERT INTO Reservas (id_cliente, id_recurso, fecha_reserva, hora_inicio, hora_fin)
-VALUES (1, 1, CURDATE(), '10:00:00', '12:00:00');
+DELIMITER ;
+
+
+-- =========================================================
+-- 1. TABLA: Adicionales elegidos en una reserva
+-- =========================================================
+CREATE TABLE Reservas_Adicionales (
+    id_reserva INT,
+    id_adicional INT,
+    precio_cobrado DECIMAL(10,2), -- Congela el precio en caso de que aumente a futuro
+    PRIMARY KEY (id_reserva, id_adicional),
+    FOREIGN KEY (id_reserva) REFERENCES Reservas(id_reserva) ON DELETE CASCADE,
+    FOREIGN KEY (id_adicional) REFERENCES Adicionales(id_adicional) ON DELETE CASCADE
+);
+
+DELIMITER //
+
+-- =========================================================
+-- 2. SP PARA LA INTERFAZ: Qué adicionales mostrar
+-- =========================================================
+-- Cuando el usuario selecciona un recurso en el ComboBox de C#, 
+-- llamás a este SP para cargar los CheckBox de adicionales permitidos.
+CREATE PROCEDURE sp_obtener_adicionales_por_recurso(IN p_id_recurso INT)
+BEGIN
+    SELECT a.id_adicional, a.descripcion, a.costo_extra
+    FROM Adicionales a
+    INNER JOIN Recursos r ON a.id_tipo_recurso = r.id_tipo
+    WHERE r.id_recurso = p_id_recurso;
+END //
+
+DELIMITER ;
+-- =========================================================
+-- 3. SP PARA GUARDAR: Agregar el adicional a la reserva
+-- =========================================================
+DELIMITER //
+CREATE PROCEDURE sp_agregar_adicional_reserva(
+    IN p_id_reserva INT,
+    IN p_id_adicional INT
+)
+BEGIN
+    DECLARE v_id_tipo_recurso INT;
+    DECLARE v_id_tipo_adicional INT;
+    DECLARE v_costo_extra DECIMAL(10,2);
+    
+    -- Obtener a qué tipo pertenece el recurso que se reservó
+    SELECT r.id_tipo INTO v_id_tipo_recurso
+    FROM Reservas res
+    INNER JOIN Recursos r ON res.id_recurso = r.id_recurso
+    WHERE res.id_reserva = p_id_reserva;
+    
+    -- Obtener para qué tipo está diseñado el adicional y cuánto cuesta
+    SELECT id_tipo_recurso, costo_extra INTO v_id_tipo_adicional, v_costo_extra
+    FROM Adicionales WHERE id_adicional = p_id_adicional;
+    
+    -- BARRERA DE SEGURIDAD: Validar que el adicional corresponda al recurso
+    IF v_id_tipo_recurso != v_id_tipo_adicional THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Operación denegada: El adicional seleccionado no está disponible para este tipo de recurso.';
+    END IF;
+    
+    -- 1. Registrar el adicional
+    INSERT INTO Reservas_Adicionales (id_reserva, id_adicional, precio_cobrado)
+    VALUES (p_id_reserva, p_id_adicional, v_costo_extra);
+    
+    -- 2. Actualizar el costo total de la reserva sumando el valor del adicional
+    UPDATE Reservas 
+    SET costo_total = costo_total + v_costo_extra 
+    WHERE id_reserva = p_id_reserva;
+END //
+
+DELIMITER ;
+
+
+-- =========================================================
+-- 1. TIPOS DE RECURSO (3 registros)
+-- =========================================================
+INSERT INTO TiposRecurso (id_tipo, descripcion) VALUES 
+(1, 'Sala de Reuniones'), 
+(2, 'Puesto de Trabajo'), 
+(3, 'Oficina Privada');
+
+-- =========================================================
+-- 2. ADICIONALES (4 registros atados a su respectivo Tipo)
+-- =========================================================
+-- El proyector y la pizarra son para Salas (Tipo 1)
+INSERT INTO Adicionales (id_tipo_recurso, descripcion, costo_extra) VALUES 
+(1, 'Proyector 4K', 2500.00),
+(1, 'Pizarra Interactiva', 1500.00);
+
+-- El monitor extra es para Puestos (Tipo 2)
+INSERT INTO Adicionales (id_tipo_recurso, descripcion, costo_extra) VALUES 
+(2, 'Monitor Extra 24"', 1000.00);
+
+-- El servicio de lunch es para Oficinas Privadas (Tipo 3)
+INSERT INTO Adicionales (id_tipo_recurso, descripcion, costo_extra) VALUES 
+(3, 'Servicio de Lunch Premium', 15000.00);
+
+-- =========================================================
+-- 3. CLIENTES (4 registros)
+-- =========================================================
+INSERT INTO Clientes (dni, nombre, apellido, telefono, email, activo) VALUES 
+('11222333', 'Juan', 'Pérez', '2234567890', 'juan.perez@email.com', TRUE),
+('44555666', 'María', 'Gómez', '2239876543', 'maria.gomez@email.com', TRUE),
+('77888999', 'Carlos', 'López', '1123456789', 'carlos.lopez@email.com', TRUE),
+('10101010', 'Ana', 'Martínez', '1144556677', 'ana.martinez@email.com', TRUE);
+
+-- =========================================================
+-- 4. RECURSOS (5 registros)
+-- =========================================================
+INSERT INTO Recursos (id_tipo, nombre, ubicacion, capacidad, precio_por_hora, estado) VALUES 
+(1, 'Sala A - Directorio', 'Planta Baja', 10, 6000.00, 'Disponible'),
+(1, 'Sala B - Creativa', 'Piso 1', 6, 4500.00, 'Disponible'),
+(2, 'Puesto 1 - Ventana', 'Piso 2 - Open Space', 1, 1500.00, 'Disponible'),
+(2, 'Puesto 2 - Pasillo', 'Piso 2 - Open Space', 1, 1500.00, 'Disponible'),
+(3, 'Oficina Ejecutiva 1', 'Piso 3', 4, 12000.00, 'Disponible');
+
+-- =========================================================
+-- 5. RESERVAS (3 registros dinámicos a futuro)
+-- Nota: Usamos DATE_ADD para que siempre se creen reservas a futuro
+-- independientemente del día en que corras este script.
+-- =========================================================
+
+-- Reserva 1: Juan Pérez reserva la Sala A para dentro de 2 días (2 horas de duración)
+INSERT INTO Reservas (id_reserva, id_cliente, id_recurso, fecha_reserva, hora_inicio, hora_fin, cantidad_personas, costo_total, estado) 
+VALUES (1, 1, 1, DATE_ADD(CURDATE(), INTERVAL 2 DAY), '10:00:00', '12:00:00', 8, 12000.00, 'Activa');
+
+-- Reserva 2: María Gómez reserva el Puesto 1 para dentro de 3 días (4 horas de duración)
+INSERT INTO Reservas (id_reserva, id_cliente, id_recurso, fecha_reserva, hora_inicio, hora_fin, cantidad_personas, costo_total, estado) 
+VALUES (2, 2, 3, DATE_ADD(CURDATE(), INTERVAL 3 DAY), '09:00:00', '13:00:00', 1, 6000.00, 'Activa');
+
+-- Reserva 3: Carlos López reserva la Oficina Ejecutiva para dentro de 4 días (3 horas de duración)
+INSERT INTO Reservas (id_reserva, id_cliente, id_recurso, fecha_reserva, hora_inicio, hora_fin, cantidad_personas, costo_total, estado) 
+VALUES (3, 3, 5, DATE_ADD(CURDATE(), INTERVAL 4 DAY), '14:00:00', '17:00:00', 3, 36000.00, 'Activa');
+
+-- =========================================================
+-- 6. RESERVAS_ADICIONALES (3 registros vinculando las reservas con sus extras)
+-- =========================================================
+
+-- A la Reserva 1 (Sala A) le agregamos el Proyector 4K (id_adicional = 1)
+INSERT INTO Reservas_Adicionales (id_reserva, id_adicional, precio_cobrado) VALUES (1, 1, 2500.00);
+-- Actualizamos el costo total de la reserva 1 sumando el extra
+UPDATE Reservas SET costo_total = costo_total + 2500.00 WHERE id_reserva = 1;
+
+-- A la Reserva 1 (Sala A) le agregamos también la Pizarra (id_adicional = 2)
+INSERT INTO Reservas_Adicionales (id_reserva, id_adicional, precio_cobrado) VALUES (1, 2, 1500.00);
+UPDATE Reservas SET costo_total = costo_total + 1500.00 WHERE id_reserva = 1;
+
+-- A la Reserva 3 (Oficina) le agregamos el Servicio de Lunch (id_adicional = 4)
+INSERT INTO Reservas_Adicionales (id_reserva, id_adicional, precio_cobrado) VALUES (3, 4, 15000.00);
+UPDATE Reservas SET costo_total = costo_total + 15000.00 WHERE id_reserva = 3;

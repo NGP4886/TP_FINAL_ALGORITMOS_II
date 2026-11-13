@@ -16,13 +16,25 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
         public string Ubicacion { get; set; }
         public int Capacidad { get; set; }
         public EstadoRecurso Estado { get; set; }
+        public decimal PrecioPorHora { get; set; }
 
         public Recurso(){}
 
-        public virtual bool PuedeReservarse(DateTime fecha,TimeSpan horaInicio, TimeSpan horaFin)
+        public virtual bool PuedeReservarse(DateTime fecha,TimeSpan horaInicio, TimeSpan horaFin,int cantidadPersonas)
         {
+            if (cantidadPersonas> this.Capacidad)
+            {
+                return false;
+            }
             return true; // aca va la logica antes de llamar a la fn
         }
+
+        public virtual decimal CalcularCostoTotal(TimeSpan horaInicio,TimeSpan horaFin)
+        {
+            decimal horasReservadas = (decimal)(horaFin - horaInicio).TotalHours;
+            return PrecioPorHora * horasReservadas;
+        }
+
 
 
     }
