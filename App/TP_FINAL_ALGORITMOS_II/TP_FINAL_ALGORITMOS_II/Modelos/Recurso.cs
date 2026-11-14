@@ -22,7 +22,7 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
 
         public virtual bool PuedeReservarse(DateTime fecha,TimeSpan horaInicio, TimeSpan horaFin,int cantidadPersonas)
         {
-            if (cantidadPersonas> this.Capacidad)
+            if (cantidadPersonas > this.Capacidad)
             {
                 return false;
             }
