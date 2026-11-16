@@ -14,6 +14,10 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
 
         public override bool PuedeReservarse(DateTime fecha, TimeSpan horaInicio, TimeSpan horaFin, int cantidadPersonas)
         {
+            if (cantidadPersonas < 10)
+            {
+                throw new Exception("La sala de reuniones debe reservarse para minimo 20 personas");
+            }
             return base.PuedeReservarse(fecha, horaInicio, horaFin,cantidadPersonas); // aca va la logica antes de llamar a la fn
         }
 

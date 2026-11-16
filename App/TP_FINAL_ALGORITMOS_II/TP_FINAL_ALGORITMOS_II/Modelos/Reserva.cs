@@ -1,13 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using TP_FINAL_ALGORITMOS_II.Enums;
+using TP_FINAL_ALGORITMOS_II.Interfaces;
 
 namespace TP_FINAL_ALGORITMOS_II.Modelos
 {
-    public class Reserva
+    public class Reserva:IExportable
     {
         public int IdReserva { get; set; }
         public Cliente Cliente { get; set; }
@@ -35,6 +38,13 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
                 costoExtras += adicional.CostoExtra;
             }
             this.CostoTotal = costoBase + costoExtras;
+        }
+
+        public string ExportarAJson()
+        {
+            string jsonReserva = JsonSerializer.Serialize(this);
+            File.WriteAllText("reserva.json", jsonReserva);
+            return jsonReserva;
         }
     }
 }

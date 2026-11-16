@@ -17,6 +17,7 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
 
         public override bool PuedeReservarse(DateTime fecha, TimeSpan horaInicio, TimeSpan horaFin,int cantidadPersonas)
         {
+            // regla del puesto de trabajo , se reserva solo para 1 peersona
             if (cantidadPersonas > 1) { return false; }
 
             return base.PuedeReservarse(fecha, horaInicio, horaFin,cantidadPersonas); // aca va la logica antes de llamar a la fn
