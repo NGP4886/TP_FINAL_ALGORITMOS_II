@@ -33,7 +33,7 @@ namespace TP_FINAL_ALGORITMOS_II.Conexion_BDD
 
                         return comando.ExecuteNonQuery() > 0;
                     }
-                    catch (MySqlException ex)
+                    catch (MySqlException)
                     {
                         throw;
                     }

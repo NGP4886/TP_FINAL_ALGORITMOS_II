@@ -4,10 +4,12 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+
 using TP_FINAL_ALGORITMOS_II.Conexion_BDD;
 using TP_FINAL_ALGORITMOS_II.Enums;
 using TP_FINAL_ALGORITMOS_II.Gestoras;
@@ -17,16 +19,20 @@ namespace TP_FINAL_ALGORITMOS_II
 {
     public partial class Form1 : Form
     {
+        private readonly GestoraRecursos gestoraRecursos;
+        private readonly GestoraClientes gestoraClientes;
+        private readonly GestoraReservas gestoraReservas;
 
-        private readonly GestoraRecursos gestoraRecursos = new GestoraRecursos();
-        private readonly GestoraClientes gestoraClientes = new GestoraClientes();
-        private readonly GestoraReservas gestoraReservas = new GestoraReservas();
 
 
 
         public Form1()
         {
             InitializeComponent();
+            gestoraClientes = new GestoraClientes();
+            gestoraReservas = new GestoraReservas();
+            gestoraRecursos = new GestoraRecursos();
+
 
         }
 
@@ -136,10 +142,21 @@ namespace TP_FINAL_ALGORITMOS_II
 
         private void Form1_Load(object sender, EventArgs e)
         {
-            PruebasIniciales();
+            CargarGrillasPrincipales();
         }
 
-        private void btnProbar_Click(object sender, EventArgs e)
+        private void CargarGrillasPrincipales()
+        {
+            dgvClientes.DataSource = gestoraClientes.ObtenerTodos();
+            dgvRecursos.DataSource = gestoraRecursos.ObtenerTodos();
+            dgvReservas.DataSource = gestoraReservas.ObtenerDetalleReservas();
+            dgvReservas.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvClientes.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dgvRecursos.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+        }
+
+        private void PruebasBackEnd(object sender, EventArgs e)
         {
             {
                 // Usamos StringBuilder para ir acumulando los mensajes como si fuera una consola
@@ -221,7 +238,7 @@ namespace TP_FINAL_ALGORITMOS_II
             }
         }
 
-        private void btnPruebaBDD_Click(object sender, EventArgs e)
+        private void PruebasBDD(object sender, EventArgs e)
         {
             StringBuilder log = new StringBuilder();
             log.AppendLine("--- INICIANDO PRUEBAS DE BASE DE DATOS ---");
@@ -250,6 +267,8 @@ namespace TP_FINAL_ALGORITMOS_II
                 // Si llegó hasta acá sin saltar al catch, la conexión es perfecta
                 log.AppendLine("\n--- LA CONEXIÓN CON MYSQL ESTÁ 100% OPERATIVA ---");
                 MessageBox.Show(log.ToString(), "Prueba de BD Exitosa", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+
             }
             catch (Exception ex)
             {
@@ -258,6 +277,159 @@ namespace TP_FINAL_ALGORITMOS_II
                                 "Fallo de Base de Datos",
                                 MessageBoxButtons.OK,
                                 MessageBoxIcon.Error);
+            }
+        }
+
+        private void PruebasJSon(object sender, EventArgs e)
+        {
+            using(MySqlConnection conexion = ConexionDAO.CrearConexion())
+            {
+                try
+                {
+                    // 1. Armamos un Cliente de prueba
+                    Cliente clientePrueba = new Cliente
+                    {
+                        IdCliente = 1,
+                        Dni = "30111222",
+                        Nombre = "Ana",
+                        Apellido = "Gómez",
+                        Email = "ana@email.com",
+                        Telefono = "2234445555",
+                        Activo = true
+                    };
+
+                    // 2. Armamos un Recurso de prueba (Sala)
+                    Sala salaPrueba = new Sala
+                    {
+                        Id = 10,
+                        TipoRecurso = new TipoRecurso { IdTipo = 1, Descripcion = "Sala de Reuniones" },
+                        Nombre = "Sala Premium B",
+                        Ubicacion = "Piso 2",
+                        Capacidad = 8,
+                        PrecioPorHora = 4500.00m,
+                        Estado = EstadoRecurso.Disponible
+                    };
+
+                    // 3. Armamos la Reserva y le agregamos un Adicional
+                    Reserva reservaPrueba = new Reserva
+                    {
+                        Cliente = clientePrueba,
+                        Recurso = salaPrueba,
+                        FechaReserva = DateTime.Now.AddDays(3),
+                        HoraInicio = new TimeSpan(14, 0, 0), // 14:00 hs
+                        HoraFin = new TimeSpan(18, 0, 0),    // 18:00 hs (4 horas)
+                        CantidadPersonas = 5,
+                        EstadoReserva = EstadoReserva.Activa
+                    };
+
+                    Adicional catering = new Adicional
+                    {
+                        IdAdicional = 5,
+                        TipoRecurso = salaPrueba.TipoRecurso,
+                        Descripcion = "Catering y Café",
+                        CostoExtra = 15000.00m
+                    };
+                    reservaPrueba.Adicionales.Add(catering);
+
+                    // Calculamos el total (4 horas x 4500 + 15000 = 33000)
+                    reservaPrueba.CalcularCostoTotal();
+
+                    // ========================================================
+                    // 4. MAGIA DEL JSON (Usando la interfaz IExportable)
+                    // ========================================================
+                    string jsonGenerado = reservaPrueba.ExportarAJson();
+
+                    // 5. Lo mostramos en un cuadro de diálogo
+                    MessageBox.Show(jsonGenerado, "Comprobante JSON Generado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    // 6. Lo guardamos como un archivo físico en el Escritorio de tu PC
+                    string rutaEscritorio = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    string rutaArchivo = Path.Combine(rutaEscritorio, "Comprobante_Reserva_AnaGomez.json");
+
+                    File.WriteAllText(rutaArchivo, jsonGenerado);
+
+                    MessageBox.Show($"¡El archivo físico se guardó exitosamente en:\n{rutaArchivo}", "Backup Exitoso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Ocurrió un error en la prueba: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+
+        }
+
+        private void salirToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Close();
+        }
+
+        private void panel2_Paint(object sender, PaintEventArgs e)
+        {
+
+        }
+
+        private void dgvClientes_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0)
+            {
+                DataGridViewRow fila = dgvClientes.Rows[e.RowIndex];
+
+                txtApellido.Text = Convert.ToString(fila.Cells["apellido"].Value);
+                txtDni.Text = Convert.ToString(fila.Cells["dni"].Value);
+                txtEmail.Text = Convert.ToString(fila.Cells["email"].Value);
+                txtIdCliente.Text = Convert.ToString(fila.Cells["id_cliente"].Value);
+                txtNombre.Text = Convert.ToString(fila.Cells["nombre"].Value);
+                txtTelefono.Text = Convert.ToString(fila.Cells["telefono"].Value);
+                clbEstado.Checked = Convert.ToString(fila.Cells["activo"].Value).ToLower() == "true" ? true : false;
+            }
+        }
+
+        private void dgvClientes_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+
+        }
+
+        private void btnAgregar_Click(object sender, EventArgs e)
+        {
+            
+            Cliente nuevoCliente = new Cliente();
+
+
+            try
+            {
+                gestoraClientes.AgregarCliente(nuevoCliente);
+            }catch(MySqlException ex)
+            {
+                if (ex.SqlState == "45000")
+                {
+                    MessageBox.Show(ex.Message, "Error al agregar cliente.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception)
+            {
+                throw new Exception();
+            }
+        }
+
+
+        private void LimpiarFormularios(TabControl tabSeleccionado)
+        {
+            if (tabSeleccionado.SelectedTab == tabClientes)
+            {
+                txtIdCliente.Text = string.Empty;
+                txtDni.Text = string.Empty;
+                txtNombre.Text = string.Empty;
+                txtApellido.Text = string.Empty;
+                txtTelefono.Text = string.Empty;
+                txtEmail.Text = string.Empty;
+                clbEstado.Checked = false;
+            }else if (tabSeleccionado.SelectedTab == tabRecursos)
+            {
+
+            }
+            else
+            {
+                // reservas
             }
         }
     }
