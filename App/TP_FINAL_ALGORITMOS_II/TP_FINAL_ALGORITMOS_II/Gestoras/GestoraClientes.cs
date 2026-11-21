@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using TP_FINAL_ALGORITMOS_II.Conexion_BDD;
+using TP_FINAL_ALGORITMOS_II.Interfaces;
 using TP_FINAL_ALGORITMOS_II.Modelos;
 
 namespace TP_FINAL_ALGORITMOS_II.Gestoras
 {
-    public class GestoraClientes
+    public class GestoraClientes : IExportable
     {
         private ClienteDAO clienteDAO;
 
@@ -47,7 +49,8 @@ namespace TP_FINAL_ALGORITMOS_II.Gestoras
             return clienteDAO.ObtenerTodos();
         }
 
-        private void ValidarDatosCliente(Cliente cliente)
+
+        public void ValidarDatosCliente(Cliente cliente)
         {
             if (string.IsNullOrWhiteSpace(cliente.Dni) || cliente.Dni.Length < 7)
                 throw new Exception("El DNI ingresado no es válido. Debe tener al menos 7 caracteres.");
@@ -55,8 +58,32 @@ namespace TP_FINAL_ALGORITMOS_II.Gestoras
             if (string.IsNullOrWhiteSpace(cliente.Nombre) || string.IsNullOrWhiteSpace(cliente.Apellido))
                 throw new Exception("El nombre y el apellido son campos obligatorios.");
 
+
             if (!string.IsNullOrWhiteSpace(cliente.Email) && !cliente.Email.Contains("@"))
                 throw new Exception("El formato del correo electrónico es incorrecto.");
+            
+        }
+
+        public string ExportarAJson()
+        {
+            DataTable dtClientes = this.ObtenerTodos();
+            List<Cliente> listaDeClientes = new List<Cliente>();
+
+            foreach(DataRow fila in dtClientes.Rows)
+            {
+                Cliente c = new Cliente
+                {
+                    IdCliente = Convert.ToInt32(fila["id_cliente"]),
+                    Dni = fila["dni"].ToString(),
+                    Nombre = fila["nombre"].ToString(),
+                    Apellido = fila["apellido"].ToString(),
+                    Telefono = fila["telefono"].ToString(),
+                    Email = fila["email"].ToString(),
+                    Activo = true
+                };
+                listaDeClientes.Add(c);
+            }
+            return JsonSerializer.Serialize(listaDeClientes);
         }
     }
 }

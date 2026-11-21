@@ -23,16 +23,14 @@ namespace TP_FINAL_ALGORITMOS_II.Modelos
 
         public string ExportarAJson()
         {
-            string jsonCliente = JsonSerializer.Serialize(this);
-            File.WriteAllText("cliente.json", jsonCliente);
-            return jsonCliente;
-            //var opciones = new JsonSerializerOptions { WriteIndented = true };
-            //return JsonSerializer.Serialize(this, opciones);
+           
+            return JsonSerializer.Serialize(this);
+            
+
         }
 
-        public string ImportarDJson()
+        public string ImportarDJson(string jsonLeido)
         {
-            string jsonLeido = File.ReadAllText("cliente.json");
             Cliente clienteLeido = JsonSerializer.Deserialize<Cliente>(jsonLeido);
             return jsonLeido;
         }

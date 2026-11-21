@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using TP_FINAL_ALGORITMOS_II.Modelos;
 using System.Data;
+using System.Windows.Forms;
 
 namespace TP_FINAL_ALGORITMOS_II.Conexion_BDD
 {
@@ -124,8 +125,27 @@ namespace TP_FINAL_ALGORITMOS_II.Conexion_BDD
                 throw;
             }
         }
+
+        
     }
 }
 
-        
+// *********************** "sp_listar_recursos" ************************ //
+/*CREATE PROCEDURE sp_listar_recursos()
+BEGIN
+    SELECT r.id_recurso,
+r.id_tipo, 
+t.descripcion AS tipo_recurso, 
+r.nombre, r.ubicacion,
+r.capacidad,
+r.precio_por_hora,
+r.estado
+    FROM Recursos r
+    INNER JOIN TiposRecurso t ON r.id_tipo = t.id_tipo
+    WHERE r.estado != 'Inactivo';
+END //
+*/
+
+
+
 

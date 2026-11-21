@@ -60,5 +60,7 @@ namespace TP_FINAL_ALGORITMOS_II.Gestoras
             if (recurso.PrecioPorHora < 0)
                 throw new Exception("El precio por hora no puede ser negativo.");
         }
+
+       
     }
 }

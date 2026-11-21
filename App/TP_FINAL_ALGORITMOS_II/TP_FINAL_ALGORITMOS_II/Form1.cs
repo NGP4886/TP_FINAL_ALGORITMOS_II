@@ -1,4 +1,6 @@
-﻿using MySql.Data.MySqlClient;
+﻿using Google.Protobuf;
+using MySql.Data.MySqlClient;
+using Org.BouncyCastle.Asn1.Tsp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -6,13 +8,16 @@ using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.Remoting.Messaging;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Text.Json;
 
 using TP_FINAL_ALGORITMOS_II.Conexion_BDD;
 using TP_FINAL_ALGORITMOS_II.Enums;
 using TP_FINAL_ALGORITMOS_II.Gestoras;
+using TP_FINAL_ALGORITMOS_II.Interfaces;
 using TP_FINAL_ALGORITMOS_II.Modelos;
 
 namespace TP_FINAL_ALGORITMOS_II
@@ -35,21 +40,100 @@ namespace TP_FINAL_ALGORITMOS_II
 
 
         }
+        public void EliminarCliente(int idCliente)
+        {
+            try
+            {
+                gestoraClientes.EliminarCliente(idCliente);
+                MessageBox.Show("Cliente eliminado correctamente.",
+                    "Cliente Eliminado",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                ActualizarGrilla(tabClientes);
+                LimpiarFormularios(tabClientes);
+            }
+            catch (MySqlException ex)
+            {
+                MessageBox.Show(ex.Message, "Error al eliminar cliente", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        public void ModificarCliente(Cliente clienteModificado)
+        {
+            try
+                
+            {
+                bool exito = gestoraClientes.ModificarCliente(clienteModificado);
+                if (exito)
+                {
+                    LimpiarFormularios(tabClientes);
+                    MessageBox.Show("Datos del cliente modificados con exito.", 
+                        "Operacion exitosa",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+
+                    ActualizarGrilla(tabClientes);
+                }
+                else
+                {
+                    MessageBox.Show("No se pudo modificar el cliente. Verifique que el ID exista.",
+                        "Atención",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+
+
+            }
+            catch(MySqlException ex)
+            {
+                if (ex.SqlState == "45000")
+                {
+                    MessageBox.Show(ex.Message, 
+                        "Error de validacion SQL.",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+
+                }
+                else
+                {
+                    MessageBox.Show("Error en la base de datos: " +
+                        ex.Message, 
+                        "Error SQL",
+                        MessageBoxButtons.OK, 
+                        MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error general: " + ex.Message,
+                    "Error",
+                    MessageBoxButtons.OK, 
+                    MessageBoxIcon.Error);
+            }
+        }
 
         public void AgregarCliente(Cliente nuevoCliente)
         {
             try
             {
+                gestoraClientes.ValidarDatosCliente(nuevoCliente);
                 gestoraClientes.AgregarCliente(nuevoCliente);
-                MessageBox.Show("Perfecto. El cliente se agrego correctamente.", "Bien ahi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                LimpiarFormularios(tabClientes);
+                MessageBox.Show("El cliente a sido guardado con exito.", "Operacion exitosa", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
+                // PODRIA HACER UN METODO PARA CADA GRID INDEPENDIENTE Y NO TENER QUE CARGAR LOS 3
             }
             catch (MySqlException ex)
             {
                 if (ex.SqlState == "45000")
                 {
-                    MessageBox.Show(ex.Message, "Error en la base de datos.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(ex.Message, "Error al agregar cliente.", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Error desconocido en la BDD", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -143,8 +227,24 @@ namespace TP_FINAL_ALGORITMOS_II
         private void Form1_Load(object sender, EventArgs e)
         {
             CargarGrillasPrincipales();
+            CargarComboTipoRecurso();
+
+            LlenarCamposClientes(dgvClientes.Rows[0]);
+            LlenarCamposRecursos(dgvRecursos.Rows[0]);
+
         }
 
+        private void CargarComboTipoRecurso()
+        {
+            TipoDeRecursoDAO dao = new TipoDeRecursoDAO();
+
+            
+            cboTipoRecurso.DisplayMember = "tipo_recurso";
+            cboTipoRecurso.ValueMember = "id_tipo";
+            cboTipoRecurso.DataSource = dao.ObtenerTodosParaCombo();
+
+
+        }
         private void CargarGrillasPrincipales()
         {
             dgvClientes.DataSource = gestoraClientes.ObtenerTodos();
@@ -153,6 +253,8 @@ namespace TP_FINAL_ALGORITMOS_II
             dgvReservas.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             dgvClientes.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             dgvRecursos.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+
+
 
         }
 
@@ -374,13 +476,7 @@ namespace TP_FINAL_ALGORITMOS_II
             {
                 DataGridViewRow fila = dgvClientes.Rows[e.RowIndex];
 
-                txtApellido.Text = Convert.ToString(fila.Cells["apellido"].Value);
-                txtDni.Text = Convert.ToString(fila.Cells["dni"].Value);
-                txtEmail.Text = Convert.ToString(fila.Cells["email"].Value);
-                txtIdCliente.Text = Convert.ToString(fila.Cells["id_cliente"].Value);
-                txtNombre.Text = Convert.ToString(fila.Cells["nombre"].Value);
-                txtTelefono.Text = Convert.ToString(fila.Cells["telefono"].Value);
-                clbEstado.Checked = Convert.ToString(fila.Cells["activo"].Value).ToLower() == "true" ? true : false;
+                LlenarCamposClientes(fila);
             }
         }
 
@@ -391,30 +487,31 @@ namespace TP_FINAL_ALGORITMOS_II
 
         private void btnAgregar_Click(object sender, EventArgs e)
         {
-            
-            Cliente nuevoCliente = new Cliente();
-
-
-            try
+            TabPage tabSeleccionado = tabPrincipal.SelectedTab;
+            if (tabSeleccionado == tabClientes)
             {
-                gestoraClientes.AgregarCliente(nuevoCliente);
-            }catch(MySqlException ex)
-            {
-                if (ex.SqlState == "45000")
+                if (!ValidarDatosFormulario(tabClientes))
                 {
-                    MessageBox.Show(ex.Message, "Error al agregar cliente.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("Faltan completar algunos datos.", "Agregar cliente", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
+
+                Cliente nuevoCliente = new Cliente();
+                nuevoCliente.Apellido = txtApellido.Text;
+                nuevoCliente.Dni = txtDni.Text;
+                nuevoCliente.Email = txtEmail.Text;
+                nuevoCliente.Nombre = txtNombre.Text;
+
+                AgregarCliente(nuevoCliente);
+                
             }
-            catch (Exception)
-            {
-                throw new Exception();
-            }
+            
         }
 
 
-        private void LimpiarFormularios(TabControl tabSeleccionado)
+        private void LimpiarFormularios(TabPage tabSeleccionado)
         {
-            if (tabSeleccionado.SelectedTab == tabClientes)
+            if (tabSeleccionado == tabClientes)
             {
                 txtIdCliente.Text = string.Empty;
                 txtDni.Text = string.Empty;
@@ -423,7 +520,7 @@ namespace TP_FINAL_ALGORITMOS_II
                 txtTelefono.Text = string.Empty;
                 txtEmail.Text = string.Empty;
                 clbEstado.Checked = false;
-            }else if (tabSeleccionado.SelectedTab == tabRecursos)
+            }else if (tabSeleccionado == tabRecursos)
             {
 
             }
@@ -431,6 +528,249 @@ namespace TP_FINAL_ALGORITMOS_II
             {
                 // reservas
             }
+        }
+
+        private bool ValidarDatosFormulario(TabPage tabSeleccionado)
+        {
+            bool valido = true;
+            if (tabSeleccionado == tabClientes)
+            {
+              if (dgvClientes.SelectedRows.Count > 0 && string.IsNullOrEmpty(txtIdCliente.Text))// sdi entra aca es porque tengo 
+                    //una seleccion en la grilla que aun no se reflejo en las cajas de texto
+                {
+                    
+                }
+                // hacer las validaciones de las cajas 
+                
+            }else if(tabSeleccionado == tabRecursos)
+            {
+
+            }
+            else
+            {
+
+            }
+            return valido;
+        }
+
+        private void btnModificar_Click(object sender, EventArgs e)
+        {
+            TabPage tabSeleccionado = tabPrincipal.SelectedTab;
+            if (tabSeleccionado == tabClientes)
+            {
+
+                if (!ValidarDatosFormulario(tabClientes))
+                {
+                    MessageBox.Show("Faltan completar algunos datos.", "Modificar cliente", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                Cliente clienteModificado = new Cliente();
+                clienteModificado.Apellido = txtApellido.Text;
+                clienteModificado.Dni = txtDni.Text;
+                clienteModificado.Email = txtEmail.Text;
+                clienteModificado.Nombre = txtNombre.Text;
+                clienteModificado.IdCliente = Convert.ToInt32(txtIdCliente.Text);
+                clienteModificado.Telefono = txtTelefono.Text;
+                clienteModificado.Activo = clbEstado.Checked;
+
+                ModificarCliente(clienteModificado);
+               
+            }
+            
+        }
+
+        private void btnLimpiar_Click(object sender, EventArgs e)
+        {
+            TabPage tabSeleccionado = tabPrincipal.SelectedTab;
+
+            LimpiarFormularios(tabSeleccionado);
+            ActualizarGrilla(tabSeleccionado);
+            
+        }
+        
+        private void ActualizarGrilla(TabPage tabSeleccionado)
+        {
+            if (tabSeleccionado == tabClientes)
+            {
+                dgvClientes.DataSource = gestoraClientes.ObtenerTodos();
+            }else if(tabSeleccionado == tabRecursos)
+            {
+                dgvRecursos.DataSource = gestoraRecursos.ObtenerTodos();
+            }
+            else
+            {
+                dgvReservas.DataSource = gestoraReservas.ObtenerDetalleReservas();
+            }
+        }
+
+        private void LlenarCamposRecursos(DataGridViewRow fila)
+        {
+            txtIdRecurso.Text = Convert.ToString(fila.Cells["id_recurso"].Value);
+            txtNombreRecurso.Text = Convert.ToString(fila.Cells["nombre"].Value);
+            txtUbicacionRecurso.Text = Convert.ToString(fila.Cells["ubicacion"].Value);
+            txtCapacadidadRecurso.Text= Convert.ToString(fila.Cells["capacidad"].Value);
+            txtPrecioPorHr.Text= Convert.ToString(fila.Cells["precio_por_hora"].Value);
+
+            if (fila.Cells["id_tipo"].Value != DBNull.Value)
+            {
+                cboTipoRecurso.SelectedValue = Convert.ToString(fila.Cells["tipo_recurso"].Value);
+            }
+            
+
+
+        }
+        private void LlenarCamposReservas(DataGridViewRow fila)
+        {
+
+        }
+        private void LlenarCamposClientes(DataGridViewRow fila)
+        {
+            txtApellido.Text = Convert.ToString(fila.Cells["apellido"].Value);
+            txtDni.Text = Convert.ToString(fila.Cells["dni"].Value);
+            txtEmail.Text = Convert.ToString(fila.Cells["email"].Value);
+            txtIdCliente.Text = Convert.ToString(fila.Cells["id_cliente"].Value);
+            txtNombre.Text = Convert.ToString(fila.Cells["nombre"].Value);
+            txtTelefono.Text = Convert.ToString(fila.Cells["telefono"].Value);
+            clbEstado.Checked = Convert.ToString(fila.Cells["activo"].Value).ToLower() == "true" ? true : false;
+        }
+
+        private void btnEliminar_Click(object sender, EventArgs e)
+        {
+            TabPage tabSeleccionado = tabPrincipal.SelectedTab;
+
+            if (tabSeleccionado == tabClientes)
+            {
+                DialogResult rsta = MessageBox.Show("Seguro de eliminar el cliente?", 
+                    "Atencion: va a eliminar un cliente",
+                    MessageBoxButtons.YesNo, 
+                    MessageBoxIcon.Warning);
+
+                if (rsta == DialogResult.No)
+                {
+                    MessageBox.Show("Se cancelo la operacion",
+                        "Operacion cancelada.",
+                        MessageBoxButtons.OK, 
+                        MessageBoxIcon.Information);
+
+                    LimpiarFormularios(tabSeleccionado);
+                    return;
+                }
+
+                int idCliente = Convert.ToInt32(txtIdCliente.Text);
+
+                EliminarCliente(idCliente);
+                
+            }else if(tabSeleccionado == tabRecursos)
+            {
+
+            }
+            else
+            {
+
+            }
+        }
+
+        private void ExportarAJson()
+        {
+
+        }
+        private void btnExportar_Click(object sender, EventArgs e)
+        {
+            GestoraExportacion gestoraJSON = new GestoraExportacion();
+            TabPage tabSeleccionado = new TabPage();
+             
+
+            // EXPORTAR CLIENTES
+            if (tabSeleccionado == tabClientes)
+            {
+                try
+                {
+                    if (dgvClientes.Rows.Count == 0)
+                    {
+                        MessageBox.Show("No hay datos en la grilla para exportar.",
+                            "Atención",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        return;
+                    }
+                    GestoraExportacion exportador = new GestoraExportacion();
+
+
+                    exportador.GuardarArchivoJson(gestoraClientes, "ListadoCompleto_clientes.json");
+                    string jsonListado = gestoraClientes.ExportarAJson();
+                    File.WriteAllText("ListadoCompleto_Clientes.json", jsonListado);
+                }catch(Exception ex)
+                {
+                    MessageBox.Show("Error al exportar: " +
+                        ex.Message,
+                        "Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+                  
+            }
+            if (tabSeleccionado == tabRecursos)
+            {
+
+            }
+            if (tabSeleccionado == tabReservas)
+            {
+
+            }
+            
+        }
+
+        private void dgvRecursos_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0)
+            {
+                DataGridViewRow fila = dgvRecursos.Rows[e.RowIndex];
+
+                LlenarCamposRecursos(fila);
+            }
+        }
+
+        private void dgvRecursos_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        {
+
+        }
+
+        private void panel5_Paint(object sender, PaintEventArgs e)
+        {
+
+        }
+
+        private void btnSalir_Click(object sender, EventArgs e)
+        {
+            Close();
+        }
+
+        private void tabPrincipal_Selecting(object sender, TabControlCancelEventArgs e)
+        {
+            
+        }
+
+        private void tabPrincipal_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            TabPage tabSeleccionado = new TabPage();
+
+            string nombreJson = string.Empty;
+
+            if (tabSeleccionado == tabClientes)
+            {
+                nombreJson = "Clientes";    
+            }else if(tabSeleccionado == tabRecursos)
+            {
+                nombreJson = "Recursos";
+
+            }else
+            {
+                nombreJson = "Reservas";
+
+            }
+
+            gbJson.Text = gbJson.Text  + nombreJson;
         }
     }
 }
